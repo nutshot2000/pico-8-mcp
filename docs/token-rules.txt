@@ -1,0 +1,250 @@
+PICO-8 Token Counting Rules
+===========================
+
+OFFICIAL LIMIT
+--------------
+Maximum tokens per cart: 8192
+
+WHAT IS A TOKEN?
+----------------
+A token is a discrete element of Lua code that PICO-8 counts toward the limit.
+Think of it as the smallest meaningful unit of code.
+
+TOKENS THAT COUNT (1 token each)
+---------------------------------
+
+Literals:
+  - nil
+  - false
+  - true
+  - Numbers: 0, 1, 42, 3.14, 0x5f, 0b1010
+  - Strings: "hello", 'world', [[multiline]]
+
+Variables and Identifiers:
+  - player, x, my_variable, _init
+  - Each identifier = 1 token, regardless of length!
+
+Operators (each counts as 1 token):
+  Arithmetic: +, -, *, /, \, %, ^
+  Relational: <, >, <=, >=, ==, ~=, !=
+  Logical: and, or, not
+  Bitwise: &, |, ^^, ~, <<, >>, <<<, >>>, <<>, >><
+  Other: .., #, @, %, $
+
+Opening Brackets (each counts as 1 token):
+  - ( opening parenthesis
+  - [ opening square bracket
+  - { opening curly brace
+
+Keywords (except end and local):
+  Control: if, then, else, elseif, while, do, repeat, until, for, in, break, goto
+  Functions: function, return
+  Other: nil, false, true, and, or, not
+
+Special Operators:
+  Assignment: =
+  Shorthand: +=, -=, *=, /=, %=, ^=
+  Each shorthand counts as 2 tokens (operator + assignment)
+
+TOKENS THAT DON'T COUNT (0 tokens)
+-----------------------------------
+
+Closing Brackets (FREE!):
+  - ) closing parenthesis
+  - ] closing square bracket
+  - } closing curly brace
+
+Punctuation (FREE!):
+  - , comma
+  - ; semicolon
+  - . period (for table access)
+  - : colon (for method calls)
+  - :: double colon (for labels)
+
+Special Keywords (FREE!):
+  - end (closes blocks)
+  - local (declares local variables)
+
+Whitespace (FREE!):
+  - Spaces, tabs, newlines
+  - Comments (both -- and --[[ ]])
+
+Special Cases:
+  - Unary minus on numeric literals: -5 counts as 1 token (not 2)
+  - Unary complement on numeric literals: ~5 counts as 1 token (not 2)
+
+COUNTING EXAMPLES
+-----------------
+
+Example 1: Simple assignment
+  Code: x = 5
+  Tokens: x, =, 5
+  Count: 3 tokens
+
+Example 2: With local (local is free!)
+  Code: local x = 5
+  Tokens: x, =, 5
+  Count: 3 tokens (local doesn't count!)
+
+Example 3: Function call
+  Code: print("hello")
+  Tokens: print, (, "hello", )
+  Count: 3 tokens (closing paren is free!)
+
+Example 4: Table access
+  Code: player.x = 10
+  Tokens: player, x, =, 10
+  Count: 4 tokens (period is free!)
+
+Example 5: If statement
+  Code: if x > 0 then y = 1 end
+  Tokens: if, x, >, 0, then, y, =, 1
+  Count: 8 tokens (end is free!)
+
+Example 6: For loop
+  Code: for i=1,10 do print(i) end
+  Tokens: for, i, =, 1, 10, do, print, (, i, )
+  Count: 9 tokens (commas and end are free!)
+
+Example 7: String (any length = 1 token!)
+  Code: msg = "this is a very long string that could be hundreds of characters"
+  Tokens: msg, =, "..."
+  Count: 3 tokens
+
+Example 8: Table literal
+  Code: t = {1, 2, 3}
+  Tokens: t, =, {, 1, 2, 3, }
+  Count: 6 tokens (commas and closing } are free!)
+
+Example 9: Table with keys
+  Code: t = {x=1, y=2}
+  Tokens: t, =, {, x, =, 1, y, =, 2, }
+  Count: 9 tokens
+
+Example 10: Shorthand operator
+  Code: x += 5
+  Tokens: x, +, =, 5
+  Count: 4 tokens (shorthand counts as 2!)
+
+COMMON MISCONCEPTIONS
+---------------------
+
+Myth: Shorter variable names use fewer tokens
+  Reality: x and my_super_long_variable_name both count as 1 token
+  Truth: Shorter names help with character limit (65535) and compression
+
+Myth: Removing spaces saves tokens
+  Reality: Spaces don't count as tokens
+  Truth: Spaces may affect compression slightly
+
+Myth: Comments affect token count
+  Reality: Comments are completely ignored by token counter
+  Truth: Use comments freely while developing!
+
+Myth: Function length affects tokens
+  Reality: Only the contents count, not the function wrapper
+  Truth: 'function' and 'end' net to 1 token (function counts, end is free)
+
+Myth: Tables are expensive
+  Reality: {, [, and ( count, but }, ], and ) don't
+  Truth: Table literals can be efficient
+
+OPTIMIZATION STRATEGIES
+-----------------------
+
+Strategy 1: Abuse Free Tokens
+  - Use as many end, ), ], } as needed - they're free!
+  - Don't avoid nested structures just to save closing brackets
+  - Use local liberally - it's free!
+
+Strategy 2: Minimize Opening Brackets
+  BAD:  func("string")
+  GOOD: func"string"
+  Saves: 1 token (the opening paren)
+
+Strategy 3: Combine Assignments
+  BAD:  x=1  y=2  z=3
+  GOOD: x,y,z=1,2,3
+  Saves: 2 tokens (two = operators)
+
+Strategy 4: Use String Storage
+  BAD:  data={1,2,3,4,5,6,7,8,9}  -- 17 tokens
+  GOOD: data="123456789"  -- 3 tokens
+  Saves: 14 tokens!
+
+Strategy 5: Omit Optional Args
+  BAD:  music(0, 0, 0)
+  GOOD: music()
+  Saves: 3 tokens
+
+Strategy 6: Use and/or for Simple Conditionals
+  BAD:  if x then y=1 end  -- 6 tokens
+  GOOD: x and y=1  -- 4 tokens
+  Saves: 2 tokens
+
+LIMITS TO REMEMBER
+------------------
+
+Token limit: 8192 tokens
+Character limit: 65535 characters
+Compressed size limit: 15616 bytes
+
+All three must be satisfied!
+
+TOKEN COUNTING TOOLS
+--------------------
+
+Built-in:
+  - PICO-8 editor shows token count in bottom-right
+  - Updates in real-time as you type
+
+External:
+  - shrinko8: Command-line tool with --count flag
+  - This MCP server: count_tokens, validate_cart, analyze_cart tools
+
+SPECIAL NOTES
+-------------
+
+1. The token counter is VERY literal
+   - It counts exactly what you type
+   - No semantic analysis or optimization
+
+2. Minifiers can help
+   - Tools like shrinko8 can reduce tokens
+   - They combine statements, rename variables, etc.
+   - But they don't change the token-counting rules!
+
+3. Token count vs. compressed size
+   - Sometimes more tokens = better compression
+   - Repeated patterns compress well
+   - Balance both limits!
+
+4. Development workflow
+   - Write readable code first
+   - Check token count periodically
+   - Optimize when approaching limit
+   - Use minifier as last resort
+
+QUICK REFERENCE CARD
+--------------------
+
+FREE (0 tokens):
+  ) ] } , ; . : :: end local
+  comments, whitespace
+
+COSTS 1 TOKEN:
+  ( [ {
+  literals (nil, true, false, numbers, strings)
+  identifiers (variables, functions)
+  operators (+, -, *, /, etc.)
+  keywords (if, then, while, for, function, etc.)
+
+COSTS 2 TOKENS:
+  +=, -=, *=, /=, %=, ^= (shorthand assignments)
+
+REMEMBER:
+  - String length doesn't matter - always 1 token!
+  - Variable name length doesn't matter - always 1 token!
+  - 'local' is FREE - use it everywhere!
+  - 'end' is FREE - don't avoid nested blocks!
+  - Closing brackets are FREE - use them freely!

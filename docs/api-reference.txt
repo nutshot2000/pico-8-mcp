@@ -1,0 +1,334 @@
+PICO-8 API Reference
+====================
+
+GRAPHICS FUNCTIONS
+------------------
+
+camera([x,] [y])
+  Set drawing camera offset
+  - x, y: Camera offset coordinates (default: 0, 0)
+
+clip([x,] [y,] [w,] [h])
+  Set screen clipping region
+  - x, y, w, h: Clipping rectangle (default: 0, 0, 128, 128)
+
+cls([col])
+  Clear screen
+  - col: Color to clear to (default: 0)
+
+color(col)
+  Set default drawing color
+  - col: Color (0-15)
+
+circ(x, y, r, [col])
+  Draw circle outline
+  - x, y: Center coordinates
+  - r: Radius
+  - col: Color (default: current color)
+
+circfill(x, y, r, [col])
+  Draw filled circle
+  - x, y: Center coordinates
+  - r: Radius
+  - col: Color (default: current color)
+
+line(x0, y0, x1, y1, [col])
+  Draw line
+  - x0, y0: Start coordinates
+  - x1, y1: End coordinates
+  - col: Color (default: current color)
+
+pal([c0,] [c1,] [p])
+  Set color palette
+  - c0: Source color
+  - c1: Destination color
+  - p: 0 for draw palette, 1 for screen palette
+
+palt([c,] [t])
+  Set transparency for color
+  - c: Color
+  - t: true for transparent, false for opaque
+
+pget(x, y)
+  Get pixel color at coordinates
+  - Returns: Color value (0-15)
+
+pset(x, y, [col])
+  Set pixel color
+  - x, y: Coordinates
+  - col: Color (default: current color)
+
+print(str, [x,] [y,] [col])
+  Print text to screen
+  - str: String to print
+  - x, y: Position (default: cursor position)
+  - col: Color (default: current color)
+
+rect(x0, y0, x1, y1, [col])
+  Draw rectangle outline
+  - x0, y0: Top-left corner
+  - x1, y1: Bottom-right corner
+  - col: Color (default: current color)
+
+rectfill(x0, y0, x1, y1, [col])
+  Draw filled rectangle
+  - x0, y0: Top-left corner
+  - x1, y1: Bottom-right corner
+  - col: Color (default: current color)
+
+spr(n, x, y, [w,] [h,] [flip_x,] [flip_y])
+  Draw sprite
+  - n: Sprite number
+  - x, y: Screen coordinates
+  - w, h: Width/height in sprites (default: 1, 1)
+  - flip_x, flip_y: Flip horizontally/vertically
+
+map(cel_x, cel_y, sx, sy, cel_w, cel_h, [layer])
+  Draw map region
+  - cel_x, cel_y: Map coordinates
+  - sx, sy: Screen coordinates
+  - cel_w, cel_h: Size in cells
+  - layer: Layer mask
+
+mset(x, y, v)
+  Set map cell
+  - x, y: Map coordinates
+  - v: Sprite number
+
+mget(x, y)
+  Get map cell
+  - Returns: Sprite number
+
+fillp([p])
+  Set fill pattern
+  - p: Fill pattern (default: 0)
+
+INPUT FUNCTIONS
+---------------
+
+btn([i,] [p])
+  Check button state
+  - i: Button number (0-5, default: all buttons)
+  - p: Player number (0-1)
+  - Returns: true if pressed, or bitfield of all buttons
+
+btnp([i,] [p])
+  Check button press (with repeat)
+  - i: Button number (0-5)
+  - p: Player number (0-1)
+  - Returns: true if just pressed
+
+SOUND FUNCTIONS
+---------------
+
+music([n,] [fade_len,] [channel_mask])
+  Play music pattern
+  - n: Pattern number (-1 to stop, default: stop)
+  - fade_len: Fade in milliseconds
+  - channel_mask: Which channels to use
+
+sfx(n, [channel,] [offset,] [length])
+  Play sound effect
+  - n: Sound number (-1 to stop, -2 to stop loop)
+  - channel: Channel (0-3, -1 for auto, default: -1)
+  - offset: Start offset in notes
+  - length: Length in notes
+
+MATH FUNCTIONS
+--------------
+
+abs(x)
+  Absolute value
+  - Returns: |x|
+
+atan2(dx, dy)
+  Angle from (0,0) to (dx,dy)
+  - Returns: Angle in range [0, 1)
+
+cos(x)
+  Cosine
+  - x: Angle in range [0, 1)
+  - Returns: cos(x * 2π)
+
+flr(x)
+  Floor (round down)
+  - Returns: Largest integer <= x
+
+max(x, y)
+  Maximum value
+  - Returns: Larger of x or y
+
+mid(x, y, z)
+  Middle value
+  - Returns: Middle value of three numbers
+
+min(x, y)
+  Minimum value
+  - Returns: Smaller of x or y
+
+rnd(x)
+  Random number
+  - x: Upper bound
+  - Returns: Random number in [0, x)
+
+sgn(x)
+  Sign
+  - Returns: -1 if x<0, 0 if x==0, 1 if x>0
+
+sin(x)
+  Sine
+  - x: Angle in range [0, 1)
+  - Returns: sin(x * 2π)
+
+sqrt(x)
+  Square root
+  - Returns: √x
+
+srand(x)
+  Set random seed
+  - x: Seed value
+
+TABLE FUNCTIONS
+---------------
+
+add(t, v, [i])
+  Add item to table
+  - t: Table
+  - v: Value to add
+  - i: Index (default: append)
+
+all(t)
+  Iterator for table
+  - Returns: Iterator function
+
+count(t)
+  Count items in table
+  - Returns: Number of items
+
+del(t, v)
+  Remove item from table
+  - t: Table
+  - v: Value to remove
+
+foreach(t, f)
+  Call function for each item
+  - t: Table
+  - f: Function to call
+
+pairs(t)
+  Iterator for key-value pairs
+
+STRING FUNCTIONS
+----------------
+
+split(str, [separator,] [convert_numbers])
+  Split string into table
+  - str: String to split
+  - separator: Separator character (default: ",")
+  - convert_numbers: Convert to numbers (default: true)
+
+sub(str, pos0, [pos1])
+  Get substring
+  - str: String
+  - pos0: Start position (1-indexed)
+  - pos1: End position (default: end of string)
+
+tonum(val, [flags])
+  Convert to number
+  - val: Value to convert
+  - flags: Conversion flags
+
+tostr(val, [flags])
+  Convert to string
+  - val: Value to convert
+  - flags: Formatting flags
+
+chr(val)
+  Convert ASCII code to character
+
+ord(str, [pos])
+  Convert character to ASCII code
+
+SYSTEM FUNCTIONS
+----------------
+
+cartdata(id)
+  Open persistent cart data
+  - id: Cart identifier (max 64 chars)
+
+dget(index)
+  Read from persistent storage
+  - index: Storage index (0-63)
+
+dset(index, value)
+  Write to persistent storage
+  - index: Storage index (0-63)
+  - value: Value to store
+
+cartdata(id)
+  Set cartridge data ID for save data
+
+load(filename, [breadcrumb,] [param_str])
+  Load and run cartridge
+
+save(filename)
+  Save cartridge to file
+
+run()
+  Run cartridge from start
+
+stop()
+  Stop execution
+
+resume()
+  Resume after stop
+
+reload(dest_addr, source_addr, len, [filename])
+  Reload memory from cartridge
+
+cstore(dest_addr, source_addr, len, [filename])
+  Store memory to cartridge
+
+memcpy(dest_addr, source_addr, len)
+  Copy memory
+
+memset(dest_addr, val, len)
+  Set memory
+
+peek(addr)
+  Read byte from memory
+
+poke(addr, val)
+  Write byte to memory
+
+peek2(addr)
+  Read 2-byte value
+
+poke2(addr, val)
+  Write 2-byte value
+
+peek4(addr)
+  Read 4-byte value
+
+poke4(addr, val)
+  Write 4-byte value
+
+stat(n)
+  Get system status
+  - n: Status code (0-102)
+
+menuitem(index, [label,] [callback])
+  Add menu item
+  - index: Menu position (1-5)
+  - label: Menu text
+  - callback: Function to call
+
+cartdata(id)
+  Initialize cart data
+
+extcmd(cmd, [p1,] [p2])
+  Execute external command
+  - "screen": Take screenshot
+  - "rec": Start GIF recording
+  - "video": Save GIF
+  - "label": Set cart label

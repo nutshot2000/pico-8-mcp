@@ -1,0 +1,319 @@
+PICO-8 Token Optimization Guide
+================================
+
+WHAT COUNTS AS TOKENS
+---------------------
+
+Tokens ARE counted:
+- Literal values: nil, false, true, numbers, strings
+- Variables and identifiers
+- Operators: +, -, *, /, %, ^, <, >, <=, >=, ==, ~=, and, or, not, #
+- Opening brackets: ( [ {
+- Keywords (except 'end' and 'local')
+
+Tokens are NOT counted:
+- Commas (,)
+- Semicolons (;)
+- Periods (.)
+- Colons (:)
+- Double colons (::)
+- Closing brackets: ) ] }
+- Keywords: end, local
+- Unary minus (-) and complement (~) when applied to numeric literals
+
+LIMIT: 8192 tokens per cartridge
+
+OPTIMIZATION TECHNIQUES
+-----------------------
+
+1. Rely on Default Arguments
+   BAD:  music(0, 0, 0)
+   GOOD: music()
+   SAVES: 2 tokens
+
+   Omit optional function arguments that default to nil.
+
+2. Calling Functions with Strings/Tables
+   BAD:  func("string")
+   GOOD: func"string"
+   SAVES: 1 token per call
+
+   Works for single literal string or table arguments.
+   Note: May require string-to-number conversion.
+
+3. Assignment with Commas
+   BAD:  x=1  y=2  z=3
+   GOOD: x,y,z=1,2,3
+   SAVES: 2 tokens
+
+   Chain multiple assignments in one statement.
+   Caution: Assignment order matters!
+
+4. Assignments Default to Nil
+   BAD:  x=nil  y=nil
+   GOOD: x,y=1
+   SAVES: 1 token
+
+   Trailing variables in assignment default to nil.
+
+5. Replace Constant Variables with Literals
+   BAD:  gravity=9.8  -- later: player.y+=gravity
+   GOOD: player.y+=9.8
+   SAVES: 3 tokens per constant
+
+   Trade readability for tokens.
+   Caution: Makes future edits harder!
+
+6. Actually Do Your Math
+   BAD:  speed=max_speed*0.5
+   GOOD: speed=max_speed/2
+   SAVES: Variable
+
+   Simplify mathematical expressions.
+   Pre-calculate fractions and constants.
+
+7. Replace Table Elements with Separate Variables
+   BAD:  player.x, player.y
+   GOOD: px, py
+   SAVES: 1 token per access
+
+   Use standalone variables instead of nested tables.
+   Caution: Less organized code.
+
+8. Cache Table Accesses with Local Variables
+   BAD:  for i=1,#enemies do
+           enemies[i].x+=1
+           enemies[i].y+=1
+         end
+   GOOD: for i=1,#enemies do
+           local e=enemies[i]
+           e.x+=1
+           e.y+=1
+         end
+   SAVES: n-1 tokens per access
+
+   Store frequently accessed table values.
+
+9. Initialize Table Properties in Declaration
+   BAD:  t={}
+         t.one=1
+         t.two=2
+   GOOD: t={one=1,two=2}
+   SAVES: 1 token per property
+
+   Create tables with properties in one statement.
+
+10. Prefer Property Access to Array Indexing
+    BAD:  t["key"]
+    GOOD: t.key
+    SAVES: 1 token per access
+
+    Use dot notation instead of bracket notation.
+
+11. Vector Dimensions as Properties
+    BAD:  v={x,y}  -- access: v[1], v[2]
+    GOOD: v={x=x,y=y}  -- access: v.x, v.y
+    SAVES: Improves readability and can save tokens
+
+12. Reuse Variables
+    BAD:  temp1=calc1()  temp2=calc2()
+    GOOD: temp=calc1()  -- use temp
+          temp=calc2()  -- reuse temp
+    SAVES: 1 token per variable
+
+    Reuse temporary variables when possible.
+
+13. Use Shorthand Operators
+    BAD:  x=x+1  y=y*2
+    GOOD: x+=1  y*=2
+    SAVES: 1 token per operation
+
+    Use +=, -=, *=, /=, %=
+
+14. Combine Conditionals
+    BAD:  if x>0 and y>0 then ... end
+    GOOD: if x>0 and y>0 then ... end
+
+    Use 'and'/'or' to combine conditions.
+
+15. Use 'and'/'or' for Simple If Statements
+    BAD:  if condition then x=1 end
+    GOOD: condition and x=1
+    SAVES: 2 tokens
+
+    Replace simple if statements with boolean operators.
+
+16. Omit 'then' in Single-Line If
+    BAD:  if x>0 then y=1 end
+    GOOD: if x>0 then y=1 end
+
+    'then' is always required, but 'end' is free!
+
+17. Use Ternary-Like Pattern
+    BAD:  if condition then x=a else x=b end
+    GOOD: x=condition and a or b
+    SAVES: 3 tokens
+
+    Caution: Fails if 'a' is false or nil!
+
+18. Combine Function Calls
+    BAD:  function update()
+            update_player()
+            update_enemies()
+          end
+    GOOD: function update()
+            update_player()update_enemies()
+          end
+    SAVES: 0 tokens (but saves chars)
+
+    Remove line breaks between statements.
+
+19. Inline Single-Use Functions
+    BAD:  function helper() return x*2 end
+          y=helper()
+    GOOD: y=x*2
+    SAVES: 4 tokens
+
+    Inline functions used only once.
+
+20. Use Bitwise Operations for Flags
+    BAD:  flag1=true  flag2=false
+    GOOD: flags=0x1  -- bit 0 is flag1
+    SAVES: Variable
+
+    Store multiple boolean flags in one number.
+
+21. String-Based Data Storage
+    BAD:  data={1,2,3,4,5,6,7,8,9}
+    GOOD: data="123456789"
+    SAVES: 7+ tokens
+
+    Strings of any length count as 1 token!
+    Access with sub() or ord().
+
+22. Loop Optimizations
+    BAD:  for i=1,#t do
+            process(t[i])
+          end
+    GOOD: for v in all(t) do
+            process(v)
+          end
+    SAVES: 2 tokens
+
+    Use all() iterator when index isn't needed.
+
+23. Remove Unnecessary Parentheses
+    BAD:  x=(a+b)*c
+    GOOD: x=(a+b)*c  -- parens needed
+
+    Closing parens are free!
+    Only remove opening parens when possible.
+
+24. Replace Multiple Returns with Table
+    BAD:  return x,y,z
+    GOOD: return{x,y,z}
+
+    Can save tokens depending on usage.
+
+25. Use Global Functions for Common Operations
+    BAD:  local function helper() ... end
+          -- use in multiple places
+    GOOD: function helper() ... end
+    SAVES: 1 token ('local')
+
+    Global functions when used widely.
+
+ADVANCED TECHNIQUES
+-------------------
+
+26. Lua _ENV for OOP
+    Use Lua's _ENV feature for object-oriented code.
+    Can save 1500+ tokens in large projects!
+
+    Example:
+    function make_obj()
+      local _ENV={}
+      function update() x+=1 end
+      function draw() spr(1,x,y) end
+      return _ENV
+    end
+
+27. Code Compression Patterns
+    Identify repeated code patterns and extract to functions.
+    Even if function call is same tokens, helps compression!
+
+28. Lazy Evaluation
+    BAD:  x=expensive_calc()
+          if condition then use(x) end
+    GOOD: if condition then use(expensive_calc()) end
+
+    Delay calculations until needed.
+
+29. Nil Punning
+    Use nil as false in boolean contexts.
+
+    BAD:  flag=false
+    GOOD: flag=nil
+    SAVES: 1 token
+
+30. Prefer Numeric Loops
+    BAD:  for k,v in pairs(t) do ... end
+    GOOD: for i=1,#t do v=t[i] ... end
+    SAVES: 2 tokens
+
+    When order doesn't matter.
+
+COMMON PATTERNS
+---------------
+
+Pattern: Init multiple variables
+  x,y,dx,dy,speed=64,64,0,0,2
+
+Pattern: Ternary operator
+  result = condition and true_val or false_val
+
+Pattern: Default value
+  value = value or default
+
+Pattern: Guard clause
+  if not condition then return end
+
+Pattern: Toggle boolean
+  flag = not flag
+
+Pattern: Clamp value
+  x = mid(x, min_val, max_val)
+
+Pattern: Cycle through values
+  state = (state + 1) % max_states
+
+ANTI-PATTERNS TO AVOID
+----------------------
+
+1. Don't optimize prematurely
+   Write working code first!
+
+2. Don't sacrifice readability unless necessary
+   Use meaningful names until you hit the limit.
+
+3. Don't inline everything
+   Functions help with compression too!
+
+4. Don't forget about compressed size limit
+   Token count isn't the only limit (15616 bytes compressed).
+
+TOOLS
+-----
+
+- shrinko8: Automatic minification tool
+- Token counter: Built into PICO-8 (bottom right of editor)
+- This MCP server: analyze_cart, validate_cart, minify_cart
+
+REMEMBER
+--------
+
+- 'end' and 'local' are FREE tokens!
+- Closing brackets are FREE: ) ] }
+- Commas, periods, semicolons, colons are FREE
+- Strings of any length = 1 token
+- Test after optimizing - bugs cost more than tokens!
