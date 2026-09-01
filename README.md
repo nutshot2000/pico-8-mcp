@@ -6,6 +6,11 @@ author sprites / sound effects / music from readable notation, and launch the re
 
 Works with Claude Code, Claude Desktop, Codex, Cursor, or any other MCP client.
 
+<p align="center">
+  <img src="docs/starvivor-sector3.png" width="480" alt="STARVIVOR, a 25-minute R-Type x Vampire Survivors shooter built and balanced entirely through this server">
+  <br><em>STARVIVOR — a 25-minute shooter written, crash-tested and balanced with these tools (the boss fights were tuned from <code>simulate_cart</code> telemetry, not by playing it 30 times).</em>
+</p>
+
 > **Credits.** This is a fork of [EBonura/pico8-mcp-server](https://github.com/EBonura/pico8-mcp-server), which
 > provided the original server and the cart analysis tools. Token counting, linting, minification and cart
 > parsing come from [shrinko8](https://github.com/thisismypassport/shrinko8) by thisismypassport. PICO-8 is made
