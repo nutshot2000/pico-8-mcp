@@ -1,9 +1,10 @@
 [project]
 name = "pico8-mcp-server"
 version = "0.1.0"
-description = "Add your description here"
+description = "MCP server for PICO-8 cart development: validation, headless simulation, gfx/sfx/music authoring, run + screenshot"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "mcp>=1.16.0",
+    "pillow>=10.0",
 ]

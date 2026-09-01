@@ -25,3 +25,4 @@ Thumbs.db
 # Test outputs
 *.p8.backup
 test_output/
+tmp/
