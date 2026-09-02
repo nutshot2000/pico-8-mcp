@@ -156,13 +156,33 @@ def run_headless(cart_path, driver_lua, timeout=60, extra_code=None):
     return {"output": "\n".join(lines), "error": error, "seconds": round(time.time() - t0, 2)}
 
 
+def _closest_lines(code, old, n=3):
+    """Cart lines most similar to the first line of a failed patch - shows what the text looks like NOW."""
+    import difflib
+    want = old.strip().split("\n")[0].strip()
+    if not want:
+        return []
+    cands = [l for l in code.split("\n") if l.strip()]
+    hits = difflib.get_close_matches(want, [l.strip() for l in cands], n=n, cutoff=0.5)
+    return [l for l in cands if l.strip() in hits][:n]
+
+
 def apply_patches(code, patches):
     """patches: list of {old, new} exact string replacements; each old must match exactly once."""
     for i, p in enumerate(patches or []):
         old, new = p["old"], p.get("new", "")
         n = code.count(old)
         if n != 1:
-            raise ValueError(f"patch {i}: expected exactly 1 match for {old!r}, found {n}")
+            msg = f"patch {i}: expected exactly 1 match for {old!r}, found {n}."
+            if n == 0:
+                near = _closest_lines(code, old)
+                msg += (" Patches are exact text matches against the cart as it is NOW (whitespace included), so a "
+                        "patch written before an edit goes stale - re-read the cart and copy the current text.")
+                if near:
+                    msg += " Closest lines in the cart: " + " | ".join(repr(l) for l in near)
+            else:
+                msg += " Include more surrounding lines so the text is unique."
+            raise ValueError(msg)
         code = code.replace(old, new)
     return code
 
@@ -286,6 +306,8 @@ KEYMAP = {
     "up": (0x26, 0x48, 1), "down": (0x28, 0x50, 1), "left": (0x25, 0x4B, 1), "right": (0x27, 0x4D, 1),
     "enter": (0x0D, 0x1C, 0), "esc": (0x1B, 0x01, 0), "p": (0x50, 0x19, 0), "space": (0x20, 0x39, 0),
     "r": (0x52, 0x13, 0), "f6": (0x75, 0x40, 0),
+    "w": (0x57, 0x11, 0), "a": (0x41, 0x1E, 0), "s": (0x53, 0x1F, 0), "d": (0x44, 0x20, 0),
+    "q": (0x51, 0x10, 0), "e": (0x45, 0x12, 0), "shift": (0x10, 0x2A, 0), "ctrl": (0x11, 0x1D, 0),
 }
 
 
@@ -364,9 +386,27 @@ def _ensure_rows(sections, key, count, width):
         rows.append("0" * width)
 
 
-def set_sprite(cart_path, index, rows):
+def sprite_cells(index, w=8, h=8):
+    """Sheet cell indices covered by a w x h block whose top-left cell is `index`."""
+    cw, ch = w // 8, h // 8
+    col, row = index % 16, index // 16
+    return [(row + dy) * 16 + (col + dx) for dy in range(ch) for dx in range(cw)]
+
+
+def _cell_is_empty(g, cell):
+    return all(ch == "0" for ch in "".join(get_sprite_rows({"__gfx__": g}, cell)))
+
+
+def set_sprite(cart_path, index, rows, overwrite=False):
     """rows: list of hex strings. Width/height may be multiples of 8; the block is
-    written with its top-left at sprite `index` on the 16-wide sheet."""
+    written with its top-left at sprite `index` on the 16-wide sheet.
+
+    A block wider or taller than 8 spills into the neighbouring cells (a 16x16 at
+    index 0 covers cells 0, 1, 16 and 17). An 8x8 write always replaces its one
+    cell, but a multi-cell block is refused if ANY covered cell already holds
+    pixels unless overwrite=True - this is the classic mistake of placing 16x16
+    sprites at consecutive indices and shredding them. Redrawing an existing
+    16x16 therefore needs overwrite=True; the error says so."""
     rows = [r.strip().lower() for r in rows if r.strip() != ""]
     if not rows:
         raise ValueError("no rows")
@@ -377,17 +417,37 @@ def set_sprite(cart_path, index, rows):
         raise ValueError("sprite block must be a multiple of 8x8")
     if not all(c in "0123456789abcdef" for r in rows for c in r):
         raise ValueError("rows may only contain hex digits 0-f (palette index)")
+    h = len(rows)
     x0, y0 = (index % 16) * 8, (index // 16) * 8
-    if x0 + w > 128 or y0 + len(rows) > 128:
-        raise ValueError("sprite block runs off the 128x128 sheet")
+    if x0 + w > 128 or y0 + h > 128:
+        raise ValueError(f"a {w}x{h} block at index {index} runs off the 128x128 sheet "
+                         f"(column {index % 16} + {w // 8} cells wide, row {index // 16} + {h // 8} cells tall)")
     header, sections = load_p8(cart_path)
     _ensure_rows(sections, "__gfx__", 128, 128)
     g = sections["__gfx__"]
+    cells = sprite_cells(index, w, h)
+    cw, ch = w // 8, h // 8
+    if not overwrite and len(cells) > 1:
+        busy = [c for c in cells if not _cell_is_empty(g, c)]
+        if busy:
+            raise ValueError(
+                f"a {w}x{h} block at index {index} covers sheet cells {cells}, and {busy} already contain pixels. "
+                f"If those belong to a different sprite, writing here would corrupt it: a {w}x{h} sprite uses {cw} "
+                f"column(s) and {ch} row(s) of the 16-wide sheet, so keep {cw} indices between sprites on a row "
+                f"(e.g. {index}, {index + cw}, {index + 2 * cw}) and {16 * ch} between rows. Pick an index whose "
+                f"{len(cells)} cells are all empty (render_gfx shows the sheet). If you are redrawing the sprite that "
+                f"already lives at index {index}, call again with overwrite=true.")
     for i, r in enumerate(rows):
         y = y0 + i
         g[y] = g[y][:x0] + r + g[y][x0 + w:]
     save_p8(cart_path, header, sections)
-    return {"index": index, "x": x0, "y": y0, "w": w, "h": len(rows)}
+    out = {"index": index, "x": x0, "y": y0, "w": w, "h": h, "cells": cells,
+           "draw_with": f"spr({index}, x, y" + (f", {cw}, {ch})" if (cw, ch) != (1, 1) else ")")}
+    if (cw, ch) != (1, 1):
+        out["next_free_index_on_this_row"] = index + cw
+        out["note"] = (f"this sprite occupies {cw}x{ch} sheet cells {cells}; render_gfx with size={max(w, h)} "
+                       f"to see it whole (in the default 8x8 view it appears split across those cells, which is normal)")
+    return out
 
 
 def get_sprite_rows(sections, index, w=8, h=8):
@@ -400,9 +460,15 @@ def get_sprite_rows(sections, index, w=8, h=8):
     return out
 
 
-def render_gfx(cart_path, sprites="0-15", scale=8, transparent0=True):
-    """Return PNG bytes of the given sprites side by side (with index labels)."""
+def render_gfx(cart_path, sprites="0-15", scale=8, transparent0=True, size=8):
+    """Return PNG bytes of the given sprites side by side (with index labels).
+
+    size=8 renders each index as one 8x8 cell. size=16/24/32 treats each index as
+    the top-left of a size x size block and draws it as a single labelled tile -
+    use this for multi-cell sprites, otherwise they look "split"."""
     from PIL import Image, ImageDraw
+    if size % 8 or not 8 <= size <= 128:
+        raise ValueError("size must be 8, 16, 24 ... 128")
     _, sections = load_p8(cart_path)
     idx = []
     for part in sprites.replace(" ", "").split(","):
@@ -415,14 +481,20 @@ def render_gfx(cart_path, sprites="0-15", scale=8, transparent0=True):
             idx.append(int(part))
     if not idx:
         raise ValueError("no sprite indices")
-    cell = 8 * scale + 4
-    per_row = min(len(idx), 16)
+    for i in idx:
+        if not 0 <= i <= 255:
+            raise ValueError(f"sprite index {i} out of range 0-255")
+        if (i % 16) * 8 + size > 128 or (i // 16) * 8 + size > 128:
+            raise ValueError(f"a {size}x{size} block at index {i} runs off the sheet; for {size}-px sprites list "
+                             f"top-left indices only (e.g. 0, {size // 8}, {2 * size // 8} ...)")
+    cell = size * scale + 4
+    per_row = min(len(idx), max(1, 128 // size))
     rows = (len(idx) + per_row - 1) // per_row
     img = Image.new("RGB", (per_row * cell, rows * (cell + 10)), (40, 40, 40))
     d = ImageDraw.Draw(img)
     for n, i in enumerate(idx):
         cx, cy = (n % per_row) * cell + 2, (n // per_row) * (cell + 10) + 10
-        for y, row in enumerate(get_sprite_rows(sections, i)):
+        for y, row in enumerate(get_sprite_rows(sections, i, size, size)):
             for x, ch in enumerate(row):
                 c = int(ch, 16)
                 if c == 0 and transparent0:

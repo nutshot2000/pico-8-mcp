@@ -14,7 +14,8 @@ spec = importlib.util.spec_from_file_location("server", "server.py")
 server_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server_module)
 
-cart_path = "/Users/ebonura/Library/Application Support/pico-8/carts/horizon-glide/v0.16.p8"
+# usage: python test_tools.py [path/to/cart.p8]   (default: examples/demo.p8)
+cart_path = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).parent / "examples" / "demo.p8")
 
 async def test_validate():
     print("=== Testing validate_cart ===")

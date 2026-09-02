@@ -44,7 +44,12 @@ try:
     p8tools.simulate_cart(TMP, seconds=5, patches=[{"old": "does not exist", "new": ""}])
     check("bad patch rejected", False)
 except ValueError as e:
-    check("bad patch rejected", True, str(e))
+    check("bad patch rejected", "re-read the cart" in str(e), str(e)[:80])
+try:
+    p8tools.simulate_cart(TMP, seconds=5, patches=[{"old": "function hurt()\n  hp-=1 hits+=1", "new": ""}])
+    check("stale patch suggests current text", False)
+except ValueError as e:
+    check("stale patch suggests current text", "function hurt()" in str(e).split("Closest lines")[-1], str(e)[-90:])
 
 r = p8tools.set_sfx(TMP, 60, "c4:2 e4:2 g4:2 c5:4", speed=8, wave=2, volume=5)
 check("set_sfx short effect", r["steps"] == 10 and r["loop_start"] == 10 and len(r["row"]) == 168)
@@ -53,10 +58,46 @@ check("set_sfx music phrase", r["steps"] == 32)
 r = p8tools.set_music(TMP, 40, [61, None, None, None], loop_start=True, loop_end=True)
 check("set_music", r["row"] == "03 3d424344", r["row"])
 r = p8tools.set_sprite(TMP, 32, ["00000000", "00888800", "08888880", "88800888", "88800888", "08888880", "00888800", "00000000"])
-check("set_sprite", r["x"] == 0 and r["y"] == 16)
+check("set_sprite", r["x"] == 0 and r["y"] == 16 and r["cells"] == [32] and r["draw_with"] == "spr(32, x, y)")
+big = ["c" * 16] * 16
+r = p8tools.set_sprite(TMP, 64, big)
+check("set_sprite 16x16", r["cells"] == [64, 65, 80, 81] and r["draw_with"] == "spr(64, x, y, 2, 2)"
+      and r["next_free_index_on_this_row"] == 66, str(r))
+for bad in (65, 80, 81, 49, 48):
+    try:
+        p8tools.set_sprite(TMP, bad, big)
+        check(f"16x16 at {bad} overlapping 64 rejected", False)
+    except ValueError as e:
+        check(f"16x16 at {bad} overlapping 64 rejected", "already contain pixels" in str(e), str(e)[:90])
+r = p8tools.set_sprite(TMP, 66, big)
+check("16x16 at 66 (correct stride) accepted", r["cells"] == [66, 67, 82, 83])
+r = p8tools.set_sprite(TMP, 96, big)
+check("16x16 at 96 (row below, stride 32) accepted", r["cells"] == [96, 97, 112, 113])
+try:
+    p8tools.set_sprite(TMP, 64, [("a" * 16)] * 16)
+    check("redrawing an existing 16x16 needs overwrite", False)
+except ValueError as e:
+    check("redrawing an existing 16x16 needs overwrite", "overwrite=true" in str(e))
+r = p8tools.set_sprite(TMP, 64, [("a" * 16)] * 16, overwrite=True)
+check("overwrite=True redraws it", r["cells"] == [64, 65, 80, 81] and p8tools.get_sprite_rows(p8tools.load_p8(TMP)[1], 81)[0] == "a" * 8)
+r = p8tools.set_sprite(TMP, 65, ["00000000", "00888800", "08888880", "88800888", "88800888", "08888880", "00888800", "00000000"])
+check("8x8 always replaces its single cell", r["cells"] == [65])
+try:
+    p8tools.set_sprite(TMP, 15, big)
+    check("16x16 at column 15 runs off sheet", False)
+except ValueError as e:
+    check("16x16 at column 15 runs off sheet", "runs off" in str(e))
 png, idx = p8tools.render_gfx(TMP, "0-3,32", scale=6)
 (HERE / "tmp" / "gfx.png").write_bytes(png)
 check("render_gfx", len(png) > 500 and idx == [0, 1, 2, 3, 32], f"{len(png)} bytes -> tmp/gfx.png")
+png16, idx = p8tools.render_gfx(TMP, "64,66", scale=4, size=16)
+(HERE / "tmp" / "gfx16.png").write_bytes(png16)
+check("render_gfx size=16", len(png16) > 200 and idx == [64, 66], "-> tmp/gfx16.png")
+try:
+    p8tools.render_gfx(TMP, "15", size=16)
+    check("render_gfx size=16 off-sheet index rejected", False)
+except ValueError as e:
+    check("render_gfx size=16 off-sheet index rejected", "top-left indices" in str(e))
 d = p8tools.describe_data(TMP)
 check("describe_data sees edits", "32" in d.split("\n")[0] and "sfx 60" in d and "pattern 40" in d)
 

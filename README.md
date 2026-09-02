@@ -33,7 +33,7 @@ sections are raw hex nobody should type by hand. The tools here remove each of t
 
 ## Install
 
-Requirements: [PICO-8](https://www.lexaloffle.com/pico-8.php) (any recent 0.2.x), Python 3.13+, [uv](https://github.com/astral-sh/uv).
+Requirements: [PICO-8](https://www.lexaloffle.com/pico-8.php) (any recent 0.2.x), Python 3.11+, [uv](https://github.com/astral-sh/uv).
 
 ```bash
 git clone --recurse-submodules https://github.com/nutshot2000/pico-8-mcp.git
@@ -118,14 +118,21 @@ returns
 - **run_headless** `(cart_path, driver_lua, timeout)`
 
 ### Window control (Windows)
-- **run_cart** `(cart_path, width=1024, height=1024)`
+- **run_cart** `(cart_path, width=1024, height=1024, restart=true)` — `restart=true` closes any PICO-8 already
+  running; pass `false` when a human may be playing in their own window
 - **send_keys** `(keys)` — `x z c v up down left right enter esc p space r f6`, `wait:MS`, `hold:KEY:MS`
 - **capture_game** `(keys?, delay_ms, count, interval_ms, max_size)` — PNG screenshots of the game area
 - **stop_cart**
 
 ### Data authoring
-- **set_sprite** `(cart_path, index, rows)` — rows of hex digits; 8×8 or larger blocks
-- **render_gfx** `(cart_path, sprites="0-15", scale)`
+- **set_sprite** `(cart_path, index, rows, overwrite=false)` — rows of hex digits; 8×8 or larger blocks.
+  The sheet is a 16-wide grid of 8×8 cells, so a 16×16 sprite at `index` also occupies `index+1`, `index+16`
+  and `index+17` and is drawn with `spr(index, x, y, 2, 2)`. Place 16×16 sprites at 0, 2, 4 … and 32, 34 …
+  — never at consecutive indices. The tool refuses to write a multi-cell block over cells that already contain
+  pixels (the error explains the stride); `overwrite=true` forces it, e.g. when redrawing an existing sprite.
+  The result includes the covered `cells` and the matching `spr()` call.
+- **render_gfx** `(cart_path, sprites="0-15", scale, size=8)` — each index is one 8×8 cell by default, so a
+  16×16 sprite appears as four labelled quarters; pass `size=16` and list the top-left indices to see it whole
 - **set_sfx** `(cart_path, index, notes, speed, wave, volume, effect, loop_start, loop_end)` —
   `note:len:wave:vol:fx` tokens, `r` = rest, a4 = 440 Hz, range c2..d#7
 - **set_music** `(cart_path, pattern, channels[4], loop_start, loop_end, stop)`
@@ -146,6 +153,7 @@ returns
 ```bash
 uv run python test_p8tools.py            # runs against examples/demo.p8
 uv run python test_p8tools.py my.p8      # or your own cart
+uv run python test_tools.py              # the analysis-tool smoke tests take the same optional cart argument
 ```
 
 `server.py` registers the MCP tools; `p8tools.py` holds the simulator, window control and data authoring;

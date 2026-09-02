@@ -127,9 +127,12 @@ async def list_tools() -> list[Tool]:
                 "Calls _init(), runs setup_lua, then _update()/_update60() for `seconds` of game time, evaluating "
                 "log_lua every log_every seconds. A 25-minute game simulates in a few seconds. Use it for: balance "
                 "telemetry, crash detection (runtime errors are reported with line numbers), regression checks. "
-                "There is no input, so patch in an autopilot / god mode with `patches` (exact string replacements on "
-                "the code, each must match once) - e.g. replace the btn() block with AI, or make hurt() count hits. "
-                "Remember PICO-8 numbers wrap above 32767: never let a frame counter run past 18 minutes."),
+                "There is NO input headless - btn() and btnp() are always false, so a title screen waiting for a key "
+                "press never advances: skip it in setup_lua (e.g. 'st=\"play\" newgame()') and patch in an autopilot / "
+                "god mode with `patches` (exact string replacements against the cart's CURRENT text, each must match "
+                "exactly once; re-read the cart after editing it or the patch goes stale) - e.g. replace the btn() block "
+                "with AI, or make hurt() count hits. Remember PICO-8 numbers wrap above 32767: never let a frame counter "
+                "run past 18 minutes."),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -165,15 +168,19 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="run_cart",
-            description=("Launch the cart in a real PICO-8 window (kills any running PICO-8 first). Default window 1024x1024 "
-                         "(PICO-8's screen is always 128x128; only the window scales). Follow with send_keys/capture_game "
-                         "to play and look at it. Prefer simulate_cart for anything measurable; use this to SEE the game."),
+            description=("Launch the cart in a real PICO-8 window. By default this KILLS any PICO-8 already running - if a human "
+                         "may be playing in their own window, pass restart=false to leave it alone (a second window opens). "
+                         "Default window 1024x1024 (PICO-8's screen is always 128x128; only the window scales). Follow with "
+                         "send_keys/capture_game to play and look at it. Prefer simulate_cart for anything measurable; use this "
+                         "to SEE the game."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "cart_path": {"type": "string"},
                     "width": {"type": "integer"},
-                    "height": {"type": "integer"}
+                    "height": {"type": "integer"},
+                    "restart": {"type": "boolean", "description": "kill any running PICO-8 first (default true). "
+                                "false = never touch an existing window, just open another one"}
                 },
                 "required": ["cart_path"]
             }
@@ -216,28 +223,41 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="set_sprite",
-            description=("Write a sprite into the __gfx__ sheet. rows = 8 strings of 8 hex digits (palette index 0-f, 0 = transparent), "
-                         "or a larger block (16x16 = 16 rows of 16 chars) placed with its top-left at sprite `index`. "
-                         "Sheet is 16 sprites wide (index = row*16 + col). Verify with render_gfx."),
+            description=("Write a sprite into the __gfx__ sheet. rows = 8 strings of 8 hex digits (palette index 0-f, 0 = transparent) "
+                         "for a normal 8x8 sprite. The sheet is a 16x16 grid of 8x8 cells (index = row*16 + col, 0-255).\n"
+                         "LARGER SPRITES: a 16x16 sprite is 16 rows of 16 chars and OCCUPIES FOUR CELLS - index, index+1, index+16, "
+                         "index+17 - so it is drawn in-game with spr(index, x, y, 2, 2). Never put 16x16 sprites at consecutive "
+                         "indices (0,1,2,3): they overwrite each other. Step by 2 along a row (0, 2, 4 ... 14) and use every "
+                         "second row (0-14, then 32-46, 64-78 ...). The tool refuses to write over a neighbouring cell that already "
+                         "has pixels unless overwrite=true. Check the result with render_gfx (pass size=16 for 16x16 sprites)."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "cart_path": {"type": "string"},
-                    "index": {"type": "integer", "description": "sprite number 0-255 (0 is conventionally left blank)"},
-                    "rows": {"type": "array", "items": {"type": "string"}}
+                    "index": {"type": "integer", "description": "top-left cell 0-255 (0 is conventionally left blank). "
+                              "For 16x16 sprites use even column indices: 2, 4, 6 ... 14, 32, 34 ..."},
+                    "rows": {"type": "array", "items": {"type": "string"},
+                             "description": "8 strings of 8 hex chars (8x8), 16 of 16 (16x16), 32 of 32 (32x32) ..."},
+                    "overwrite": {"type": "boolean", "description": "allow the block to overwrite neighbouring cells that "
+                                  "already contain pixels (default false = refuse with an explanation)"}
                 },
                 "required": ["cart_path", "index", "rows"]
             }
         ),
         Tool(
             name="render_gfx",
-            description="Render sprites from the cart as an image so you can check the art. sprites: '0-15' or '1,3,7-9'.",
+            description=("Render sprites from the cart as an image so you can check the art. sprites: '0-15' or '1,3,7-9'. "
+                         "Each index is drawn as one 8x8 cell by default, so a 16x16 sprite shows up as four separate labelled "
+                         "quarters - that is normal, not broken. To see 16x16 sprites whole, pass size=16 and list only their "
+                         "top-left indices (e.g. sprites='0,2,4', size=16)."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "cart_path": {"type": "string"},
                     "sprites": {"type": "string", "description": "index list/ranges (default '0-15')"},
-                    "scale": {"type": "integer", "description": "pixels per texel (default 8)"}
+                    "scale": {"type": "integer", "description": "pixels per texel (default 8)"},
+                    "size": {"type": "integer", "description": "sprite size in pixels: 8 (default), 16, 24, 32 ... each listed "
+                             "index is the top-left cell of a size x size block"}
                 },
                 "required": ["cart_path"]
             }
@@ -911,8 +931,11 @@ Claude can reference it automatically when needed."""
             return text(f"{head}\n{r['output']}")
 
         if name == "run_cart":
-            pid = p8tools.run_cart(arguments["cart_path"], arguments.get("width", 1024), arguments.get("height", 1024))
-            return text(f"PICO-8 launched (pid {pid}) running {arguments['cart_path']}. Use capture_game to look at it, send_keys to play.")
+            restart = arguments.get("restart", True)
+            pid = p8tools.run_cart(arguments["cart_path"], arguments.get("width", 1024), arguments.get("height", 1024), restart=restart)
+            return text(f"PICO-8 launched (pid {pid}) running {arguments['cart_path']}"
+                        + (" (any previous PICO-8 window was closed)" if restart else " (existing PICO-8 windows left running)")
+                        + ". Use capture_game to look at it, send_keys to play.")
 
         if name == "stop_cart":
             return text(p8tools.stop_cart())
@@ -937,12 +960,18 @@ Claude can reference it automatically when needed."""
             return out
 
         if name == "set_sprite":
-            r = p8tools.set_sprite(arguments["cart_path"], arguments["index"], arguments["rows"])
+            r = p8tools.set_sprite(arguments["cart_path"], arguments["index"], arguments["rows"],
+                                   overwrite=arguments.get("overwrite", False))
             return text(f"sprite written: {json.dumps(r)}")
 
         if name == "render_gfx":
-            png, idx = p8tools.render_gfx(arguments["cart_path"], arguments.get("sprites", "0-15"), arguments.get("scale", 8))
-            return image(png, f"sprites {idx} (checkerboard = colour 0 / transparent)")
+            size = arguments.get("size", 8)
+            png, idx = p8tools.render_gfx(arguments["cart_path"], arguments.get("sprites", "0-15"), arguments.get("scale", 8),
+                                          size=size)
+            cap = f"{size}x{size} sprites at top-left indices {idx} (checkerboard = colour 0 / transparent)"
+            if size == 8:
+                cap += ". Each tile is one 8x8 cell; a 16x16 sprite spans cells n, n+1, n+16, n+17 and so appears here in four parts - re-render with size=16 to see it whole."
+            return image(png, cap)
 
         if name == "set_sfx":
             a = arguments

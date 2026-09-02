@@ -12,7 +12,8 @@ from pico_tokenize import tokenize, count_tokens
 from pico_process import Source
 from pico_compress import write_compressed_size
 
-cart_path = "/Users/ebonura/Library/Application Support/pico-8/carts/horizon-glide/v0.16.p8"
+# usage: python test_server.py [path/to/cart.p8]   (default: examples/demo.p8)
+cart_path = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).parent / "examples" / "demo.p8")
 
 try:
     # Read the cart
@@ -38,7 +39,7 @@ try:
     compressed = size_handler.size
 
     # Format output
-    print(f"Token Count Results for horizon-glide/v0.16.p8:")
+    print(f"Token Count Results for {Path(cart_path).name}:")
     print(f"tokens: {count} ({count/8192*100:.2f}%)")
     print(f"chars: {char_count} ({char_count/65535*100:.0f}%)")
     print(f"compressed: {compressed} ({compressed/15616*100:.2f}%)")

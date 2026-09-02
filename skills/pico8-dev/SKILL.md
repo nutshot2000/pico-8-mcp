@@ -24,9 +24,16 @@ for everything else. Never hand-type `__gfx__` / `__sfx__` / `__music__` hex.
 4. **Art / sound**: `set_sprite` (rows of hex digits), `render_gfx` to eyeball them, `set_sfx` with note names
    (`"c4:2 e4:2 g4:4 r:2"`), `set_music` to arrange sfx into 4-channel patterns. `read_cart` summarises what
    is defined.
+   - **16x16 sprites take FOUR sheet cells** (`n, n+1, n+16, n+17`) and are drawn with `spr(n,x,y,2,2)`. Lay them
+     out at 0, 2, 4 ... 14 then 32, 34 ... - never at consecutive indices. `set_sprite` refuses to write a
+     multi-cell block over occupied cells (pass `overwrite=true` only when redrawing that same sprite), and
+     returns the `cells` + `draw_with` call. In `render_gfx` a 16x16 looks like four labelled quarters - that is
+     normal; pass `size=16` with the top-left indices to see it whole.
 5. **Look at it** only when needed: `run_cart`, `capture_game` (returns screenshots, can send keys first),
-   `send_keys`, `stop_cart`. If the user is playing, do NOT call run_cart/send_keys - it kills or hijacks their
-   window; ask, or use simulate_cart instead.
+   `send_keys`, `stop_cart`. `run_cart` kills any running PICO-8 by default - if the user may be playing, pass
+   `restart=false` (opens a second window) or use simulate_cart; never send_keys into their game.
+   `simulate_cart` has no input at all (`btn`/`btnp` are always false), so autopilots must bypass them, and
+   `patches` match exact current text - re-read the cart before patching after any edit.
 
 ## Hard rules learned the expensive way
 
