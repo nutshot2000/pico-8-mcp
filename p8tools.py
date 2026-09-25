@@ -188,7 +188,8 @@ def apply_patches(code, patches):
 
 
 def simulate_cart(cart_path, seconds, setup_lua="", log_every=30, log_lua="", patches=None,
-                  call_draw=False, stop_when="", timeout=120, fps=None):
+                  call_draw=False, stop_when="", timeout=120, fps=None, runs=1, seed=None,
+                  summary_lua="", inputs_lua="", real_cartdata=False):
     """Run the game loop headless for `seconds` of game time.
 
     The cart's _init is called, then setup_lua runs, then _update (or _update60)
@@ -196,6 +197,14 @@ def simulate_cart(cart_path, seconds, setup_lua="", log_every=30, log_lua="", pa
     expression log_lua is evaluated and printed with a [m:ss] prefix. stop_when
     is a Lua condition that ends the run early. The cart's _update/_draw are
     renamed so pico8 -x doesn't start its own game loop.
+
+    runs > 1 repeats the whole thing (_init, setup_lua, loop) and, if summary_lua
+    (a numeric Lua expression) is given, reports its min/avg/max over the runs.
+    seed makes runs reproducible (run k uses srand(seed+k-1)).
+    inputs_lua runs before every frame and presses buttons with press(0..5), so
+    btn()/btnp() work headless without patching the cart.
+    cartdata/dget/dset are sandboxed in memory unless real_cartdata=True, so a
+    bot's score never lands in the player's save.
     """
     code = apply_patches(code_of(cart_path), patches)
     has60 = re.search(r"function\s+_update60\s*\(", code) is not None
@@ -209,19 +218,47 @@ def simulate_cart(cart_path, seconds, setup_lua="", log_every=30, log_lua="", pa
     has_draw = re.search(r"function\s+__sim_draw\s*\(", code) is not None
 
     seconds = int(seconds)
+    runs = max(1, min(200, int(runs or 1)))
     log_expr = log_lua.strip() or '""'
     stop = stop_when.strip() or "false"
     draw = " __sim_draw()" if (call_draw and has_draw) else ""
+    prelude = ""
+    if not real_cartdata:
+        prelude += ("__sim_cd={} cartdata=function() return true end\n"
+                    "dget=function(i) return __sim_cd[i] or 0 end dset=function(i,v) __sim_cd[i]=v end\n")
+    frame_in = ""
+    if inputs_lua.strip():
+        # btn()/btnp() read what inputs_lua pressed this frame; btnp is a plain edge (no key repeat)
+        prelude += ("__sim_b={} __sim_pb={}\n"
+                    "function press(...) for __i in all({...}) do __sim_b[__i]=true end end\n"
+                    "btn=function(i) if i==nil then local m=0 for k=0,5 do if __sim_b[k] then m+=1<<k end end return m end "
+                    "return __sim_b[i]==true end\n"
+                    "btnp=function(i) if i==nil then return 0 end return __sim_b[i]==true and not __sim_pb[i] end\n")
+        frame_in = f"__sim_pb=__sim_b __sim_b={{}} {inputs_lua}\n"
+    tag = '"run "..__run.." "' if runs > 1 else '""'
+    reseed = f"srand({int(seed)}+__run-1)" if seed is not None else ""
+    summary = f'printh("@@SUM "..tostr({summary_lua.strip()}))' if summary_lua.strip() else ""
+    # stat(1) is cumulative headless (there is no flip), so a frame's cost is the delta around it
     driver = f"""
+{prelude}
 function __sim_tm(s) return flr(s/60)..":"..(s%60<10 and "0" or "")..s%60 end
-function __sim_log(tag) printh("["..__sim_tm(__sim_s).."] "..tag..tostr({log_expr})) end
+function __sim_log(tag) printh(__sim_tag.."["..__sim_tm(__sim_s).."] "..tag..tostr({log_expr})) end
+__sim_pk=0
+for __run=1,{runs} do
+__sim_tag={tag}
+{reseed}
 if _init then _init() end
 {setup_lua}
 __sim_s=0 __sim_done=false
 for __m=1,{(seconds + 59) // 60} do
  for __sec=1,60 do
   if not __sim_done and __sim_s<{seconds} then
-   for __f=1,{fps} do __sim_update(){draw} end
+   for __f=1,{fps} do
+    {frame_in}local __c0=stat(1)
+    __sim_update(){draw}
+    local __cd=stat(1)-__c0
+    if __cd>0 and __cd<50 then __sim_pk=max(__sim_pk,__cd) end
+   end
    __sim_s+=1
    if __sim_s%{max(1, int(log_every))}==0 then __sim_log("") end
    if {stop} then __sim_done=true __sim_log("STOP ") end
@@ -229,9 +266,25 @@ for __m=1,{(seconds + 59) // 60} do
  end
 end
 __sim_log("END ")
-printh("cpu="..stat(1).." mem="..stat(0))
+{summary}
+end
+printh("peak frame cpu="..flr(__sim_pk*100).."%{'' if draw else ' (update only - pass call_draw for update+draw)'} mem="..stat(0))
 """
-    return run_headless(cart_path, driver, timeout=timeout, extra_code=code)
+    r = run_headless(cart_path, driver, timeout=timeout, extra_code=code)
+    vals, keep = [], []
+    for ln in r["output"].split("\n"):
+        if ln.startswith("@@SUM "):
+            try:
+                vals.append(float(ln[6:]))
+            except ValueError:
+                keep.append(f"summary_lua gave a non-number: {ln[6:]!r}")
+        else:
+            keep.append(ln)
+    r["output"] = "\n".join(keep)
+    if vals:
+        r["summary"] = {"runs": len(vals), "min": min(vals), "avg": round(sum(vals) / len(vals), 2),
+                        "max": max(vals), "values": vals}
+    return r
 
 
 # ----------------------------------------------------------------------------- run / capture (Windows)
@@ -246,7 +299,11 @@ def _kill_pico8():
     return r.returncode == 0
 
 
+_last_pid = None   # window tools target the cart we launched, never somebody else's PICO-8
+
+
 def run_cart(cart_path, width=1024, height=1024, restart=True):
+    global _last_pid
     exe = _find_pico8()
     if restart:
         _kill_pico8()
@@ -257,6 +314,7 @@ def run_cart(cart_path, width=1024, height=1024, restart=True):
     else:
         kw["start_new_session"] = True
     proc = subprocess.Popen([exe, "-width", str(width), "-height", str(height), "-run", str(Path(cart_path).resolve())], **kw)
+    _last_pid = proc.pid
     return proc.pid
 
 
@@ -281,7 +339,12 @@ def _u32():
     return _user32
 
 
-def _find_window(title_substr="PICO-8"):
+def _find_window(title_substr="PICO-8", pid=None):
+    """(hwnd, title) of the PICO-8 window to drive.
+
+    pid given: that process's window or an error. Otherwise the window of the
+    last cart run_cart launched if it is still open, else the first window
+    titled like PICO-8's own ("PICO-8" / "CART.P8 (PICO-8)")."""
     u = _u32()
     found = []
     EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
@@ -293,14 +356,25 @@ def _find_window(title_substr="PICO-8"):
                 buf = ctypes.create_unicode_buffer(n + 1)
                 u.GetWindowTextW(hwnd, buf, n + 1)
                 if title_substr.lower() in buf.value.lower():
-                    found.append((hwnd, buf.value))
+                    wp = ctypes.c_ulong()
+                    u.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(wp))
+                    found.append((hwnd, buf.value, wp.value))
         return True
 
     u.EnumWindows(EnumProc(cb), 0)
+    if pid:
+        mine = [w for w in found if w[2] == int(pid)]
+        if not mine:
+            raise RuntimeError(f"no PICO-8 window for pid {pid} - it has not opened yet or was closed")
+        return mine[0][:2]
+    if _last_pid:
+        mine = [w for w in found if w[2] == _last_pid]
+        if mine:
+            return mine[0][:2]
     # PICO-8's own window is "PICO-8" or "CART.P8 (PICO-8)"; a browser tab titled
     # "...pico-8-mcp..." must not win just because it is higher in z-order
     real = [w for w in found if w[1].upper() == "PICO-8" or w[1].upper().endswith("(PICO-8)")]
-    return (real or found or [(None, None)])[0]
+    return (real or found or [(None, None)])[0][:2]
 
 
 # vk, scancode, extended
@@ -328,9 +402,9 @@ def _focus(hwnd):
     return u.GetForegroundWindow() == hwnd
 
 
-def send_keys(keys, hold_ms=80, gap_ms=120):
+def send_keys(keys, hold_ms=80, gap_ms=120, pid=None):
     """keys: space separated names from KEYMAP; 'wait:N' sleeps N ms; 'hold:name:N' holds a key N ms."""
-    hwnd, title = _find_window()
+    hwnd, title = _find_window(pid=pid)
     if not hwnd:
         raise RuntimeError("no PICO-8 window found - call run_cart first")
     ok = _focus(hwnd)
@@ -354,10 +428,19 @@ def send_keys(keys, hold_ms=80, gap_ms=120):
     return {"window": title, "focused": ok, "sent": sent}
 
 
-def capture_window(max_size=512):
+def capture_window(max_size=512, pid=None):
     """Screenshot the PICO-8 window's client area, downscaled; returns PNG bytes."""
+    img, title = _grab(pid, max_size)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue(), title, img.size
+
+
+def _grab(pid=None, max_size=512, hwnd=None, title=None):
+    """PIL image of the PICO-8 window's client area."""
     from PIL import ImageGrab
-    hwnd, title = _find_window()
+    if hwnd is None:
+        hwnd, title = _find_window(pid=pid)
     if not hwnd:
         raise RuntimeError("no PICO-8 window found - call run_cart first")
     u = _u32()
@@ -376,9 +459,77 @@ def capture_window(max_size=512):
     img = ImageGrab.grab(bbox=box, all_screens=True)
     if max_size and max(img.size) > max_size:
         img = img.resize((max_size, int(img.size[1] * max_size / img.size[0])))
+    return img, title
+
+
+def play_script(script, pid=None, shot_size=256, wait_ready=True):
+    """Drive the window in real time from ONE call and return a filmstrip.
+
+    script tokens (space separated): down:KEY  up:KEY  tap:KEY (60ms press)
+    hold:KEY:MS  wait:MS  shot. Keys stay held across later tokens until up:KEY,
+    so 'down:x down:right wait:300 shot shot up:x' captures mid-swing. Every key
+    is released at the end even if the script fails. wait_ready waits for the
+    cart to finish booting first (a key sent while PICO-8 boots is lost).
+    Returns (png_bytes, title, shot_log)."""
+    from PIL import Image, ImageDraw
+    hwnd, title = _find_window(pid=pid)
+    if not hwnd:
+        raise RuntimeError("no PICO-8 window found - call run_cart first")
+    if wait_ready:
+        t_end = time.time() + 10
+        while not title.upper().endswith("(PICO-8)") and time.time() < t_end:
+            time.sleep(0.2)
+            hwnd, title = _find_window(pid=pid)
+        time.sleep(0.3)
+    _focus(hwnd)
+    held, shots, log = set(), [], []
+    t0 = time.time()
+
+    def key(name, down):
+        if name not in KEYMAP:
+            raise ValueError(f"unknown key {name!r}; known: {', '.join(KEYMAP)}")
+        _key(*KEYMAP[name], down)
+        (held.add if down else held.discard)(name)
+
+    try:
+        for tok in script.split():
+            kind, _, arg = tok.partition(":")
+            if kind == "down":
+                key(arg, True)
+            elif kind == "up":
+                key(arg, False)
+            elif kind == "tap":
+                key(arg, True); time.sleep(0.06); key(arg, False)
+            elif kind == "hold":
+                name, _, ms = arg.partition(":")
+                key(name, True); time.sleep(int(ms) / 1000); key(name, False)
+            elif kind == "wait":
+                time.sleep(int(arg) / 1000)
+            elif kind == "shot":
+                if len(shots) >= 16:
+                    raise ValueError("at most 16 shots per script")
+                img, _ = _grab(max_size=shot_size, hwnd=hwnd, title=title)
+                shots.append(img)
+                log.append(f"shot {len(shots)} at {int((time.time() - t0) * 1000)}ms"
+                           + (f" holding {'+'.join(sorted(held))}" if held else ""))
+            else:
+                raise ValueError(f"unknown token {tok!r}: use down:K up:K tap:K hold:K:MS wait:MS shot")
+    finally:
+        for name in list(held):
+            _key(*KEYMAP[name], False)
+    if not shots:
+        return None, title, log
+    cols = min(4, len(shots))
+    rows = (len(shots) + cols - 1) // cols
+    w, h = shots[0].size
+    strip = Image.new("RGB", (cols * (w + 4) - 4, rows * (h + 4) - 4), (40, 40, 40))
+    for i, im in enumerate(shots):
+        x, y = (i % cols) * (w + 4), (i // cols) * (h + 4)
+        strip.paste(im, (x, y))
+        ImageDraw.Draw(strip).text((x + 3, y + h - 12), str(i + 1), fill=(255, 255, 0))
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue(), title, img.size
+    strip.save(buf, format="PNG")
+    return buf.getvalue(), title, log
 
 
 # ----------------------------------------------------------------------------- gfx

@@ -18,9 +18,13 @@ for everything else. Never hand-type `__gfx__` / `__sfx__` / `__music__` hex.
    prints `log_lua` every `log_every` seconds. A 25-minute game takes about a minute of wall clock. Use it to:
    - catch crashes (`runtime error line L tab T [cart code line N]` - fix and rerun)
    - measure pacing: level per minute, kills/sec, enemies + bullets on screen, boss HP over time, hits taken
-   - make the game play itself with `patches` (exact string replacements, each must match exactly once):
-     god mode (the hurt function counts `hits` instead of dying), an autopilot replacing the `btn()` block,
-     auto-pick for level-up menus, `stop_when='st=="win" or st=="over"'`
+   - make the game play itself with `inputs_lua` (runs every frame, call `press(0..5)`; `btn`/`btnp` then see
+     it - no patching). Use `patches` (exact string replacements, each must match once) for god mode (the
+     hurt function counts `hits` instead of dying); `stop_when='st=="win" or st=="over"'`
+   - compare balance changes over MANY games, not one lucky run: `runs=12, seed=1, summary_lua="height"` gives
+     min/avg/max. Keep the seed fixed when comparing before/after.
+   - saves are sandboxed (bots never overwrite the player's best); the last line is peak per-frame CPU -
+     pass `call_draw` so it includes drawing (it tracks PICO-8's own meter closely)
 4. **Art / sound**: `set_sprite` (rows of hex digits), `render_gfx` to eyeball them, `set_sfx` with note names
    (`"c4:2 e4:2 g4:4 r:2"`), `set_music` to arrange sfx into 4-channel patterns. `read_cart` summarises what
    is defined.
@@ -29,11 +33,12 @@ for everything else. Never hand-type `__gfx__` / `__sfx__` / `__music__` hex.
      multi-cell block over occupied cells (pass `overwrite=true` only when redrawing that same sprite), and
      returns the `cells` + `draw_with` call. In `render_gfx` a 16x16 looks like four labelled quarters - that is
      normal; pass `size=16` with the top-left indices to see it whole.
-5. **Look at it** only when needed: `run_cart`, `capture_game` (returns screenshots, can send keys first),
-   `send_keys`, `stop_cart`. `run_cart` kills any running PICO-8 by default - if the user may be playing, pass
-   `restart=false` (opens a second window) or use simulate_cart; never send_keys into their game.
-   `simulate_cart` has no input at all (`btn`/`btnp` are always false), so autopilots must bypass them, and
-   `patches` match exact current text - re-read the cart before patching after any edit.
+5. **Look at it** only when needed: `run_cart`, then `play_script` for real-time play (one call:
+   `down:x down:right wait:200 shot shot up:x` - holds keys while it screenshots, returns a filmstrip) or
+   `capture_game` for a still. Separate send_keys/capture calls are too slow for action games. `run_cart` kills
+   any running PICO-8 by default - if the user may be playing, pass `restart=false`; the window tools then
+   target the process you launched by pid, never their window. `patches` match exact current text - re-read
+   the cart before patching after any edit.
 
 ## Hard rules learned the expensive way
 

@@ -2,7 +2,7 @@
 
     uv run python test_p8tools.py [path/to/cart.p8]
 """
-import shutil, sys, time
+import os, shutil, sys, time
 from pathlib import Path
 import p8tools
 
@@ -50,6 +50,25 @@ try:
     check("stale patch suggests current text", False)
 except ValueError as e:
     check("stale patch suggests current text", "function hurt()" in str(e).split("Closest lines")[-1], str(e)[-90:])
+
+# --- sandboxed saves, scripted input, batches, seeds
+IO_CART = HERE / "tmp" / "io_test.p8"
+IO_CART.write_text("pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+                   "function _init() cartdata(\"p8mcp_sandbox_test\") n=dget(0)+1 dset(0,n) x=0 taps=0 r=rnd(1000)\\1 end\n"
+                   "function _update() if btn(1) then x+=1 end if btnp(5) then taps+=1 end end\n", encoding="utf-8")
+cdata = Path(os.environ.get("APPDATA", "")) / "pico-8" / "cdata" / "p8mcp_sandbox_test.p8d.txt"
+if cdata.exists():
+    cdata.unlink()
+r = p8tools.simulate_cart(IO_CART, seconds=4, runs=3, summary_lua="n", timeout=30)
+check("sandboxed cartdata persists across runs in memory", r.get("summary", {}).get("values") == [1, 2, 3], str(r.get("summary")))
+check("sandboxed cartdata never touches the real save file", not cdata.exists(), str(cdata))
+r = p8tools.simulate_cart(IO_CART, seconds=4, inputs_lua="press(1) if __sim_s%2==0 then press(5) end",
+                          log_every=4, log_lua='"x="..x.." taps="..taps', timeout=30)
+check("inputs_lua drives btn() and edge-only btnp()", "x=120 taps=2" in r["output"], r["output"].split("\n")[0])
+check("peak per-frame cpu reported", "peak frame cpu=" in r["output"], r["output"].split("\n")[-1])
+a = p8tools.simulate_cart(IO_CART, seconds=1, runs=3, seed=7, summary_lua="r", timeout=30)["summary"]["values"]
+b = p8tools.simulate_cart(IO_CART, seconds=1, runs=3, seed=7, summary_lua="r", timeout=30)["summary"]["values"]
+check("seed makes batches reproducible", a == b and len(set(a)) > 1, f"{a} vs {b}")
 
 r = p8tools.set_sfx(TMP, 60, "c4:2 e4:2 g4:2 c5:4", speed=8, wave=2, volume=5)
 check("set_sfx short effect", r["steps"] == 10 and r["loop_start"] == 10 and len(r["row"]) == 168)

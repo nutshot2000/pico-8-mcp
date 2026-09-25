@@ -127,12 +127,15 @@ async def list_tools() -> list[Tool]:
                 "Calls _init(), runs setup_lua, then _update()/_update60() for `seconds` of game time, evaluating "
                 "log_lua every log_every seconds. A 25-minute game simulates in a few seconds. Use it for: balance "
                 "telemetry, crash detection (runtime errors are reported with line numbers), regression checks. "
-                "There is NO input headless - btn() and btnp() are always false, so a title screen waiting for a key "
-                "press never advances: skip it in setup_lua (e.g. 'st=\"play\" newgame()') and patch in an autopilot / "
-                "god mode with `patches` (exact string replacements against the cart's CURRENT text, each must match "
-                "exactly once; re-read the cart after editing it or the patch goes stale) - e.g. replace the btn() block "
-                "with AI, or make hurt() count hits. Remember PICO-8 numbers wrap above 32767: never let a frame counter "
-                "run past 18 minutes."),
+                "INPUT: pass `inputs_lua` - Lua run before every frame that presses buttons with press(0..5) "
+                "(e.g. 'if p.x<tx then press(1) end if ft%10==0 then press(5) end'); btn()/btnp() then return those "
+                "presses, so a bot needs no patches. Without it btn()/btnp() are always false. `patches` (exact string "
+                "replacements against the cart's CURRENT text, each must match once) are still there for god mode etc. "
+                "BATCHES: runs=N repeats the game (with seed for reproducible maps) and summary_lua (a number, e.g. 'h') "
+                "is reported as min/avg/max over the runs - use it to compare balance changes. "
+                "SAVES: cartdata/dget/dset are sandboxed in memory, so a bot never overwrites the player's best score "
+                "(real_cartdata=true to opt out). The last line reports peak per-frame CPU (use call_draw for draw cost). "
+                "Remember PICO-8 numbers wrap above 32767: never let a frame counter run past 18 minutes."),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -144,8 +147,13 @@ async def list_tools() -> list[Tool]:
                     "stop_when": {"type": "string", "description": "Lua condition that ends the run early, e.g. 'st==\"over\" or st==\"win\"'"},
                     "patches": {"type": "array", "items": {"type": "object", "properties": {"old": {"type": "string"}, "new": {"type": "string"}}, "required": ["old"]},
                                 "description": "exact-string code replacements applied before running (god mode, autopilot, auto-pick menus)"},
-                    "call_draw": {"type": "boolean", "description": "also call _draw() each frame (slower; only if game logic lives in _draw)"},
-                    "timeout": {"type": "integer", "description": "wall-clock seconds before giving up (default 120)"}
+                    "call_draw": {"type": "boolean", "description": "also call _draw() each frame (slower; catches draw errors and measures draw CPU)"},
+                    "timeout": {"type": "integer", "description": "wall-clock seconds before giving up (default 120)"},
+                    "inputs_lua": {"type": "string", "description": "Lua run before every frame; call press(i) for each held button (0-3 arrows, 4 O/Z, 5 X). btnp() sees a press only on the frame it starts"},
+                    "runs": {"type": "integer", "description": "repeat the whole game this many times (default 1, max 200); _init + setup_lua run each time"},
+                    "seed": {"type": "integer", "description": "srand(seed+run-1) before each run, for reproducible results"},
+                    "summary_lua": {"type": "string", "description": "numeric Lua expression evaluated at the end of each run; min/avg/max over runs is reported"},
+                    "real_cartdata": {"type": "boolean", "description": "let the cart read/write its real save file (default false = sandboxed)"}
                 },
                 "required": ["cart_path", "seconds"]
             }
@@ -170,8 +178,9 @@ async def list_tools() -> list[Tool]:
             name="run_cart",
             description=("Launch the cart in a real PICO-8 window. By default this KILLS any PICO-8 already running - if a human "
                          "may be playing in their own window, pass restart=false to leave it alone (a second window opens). "
-                         "Default window 1024x1024 (PICO-8's screen is always 128x128; only the window scales). Follow with "
-                         "send_keys/capture_game to play and look at it. Prefer simulate_cart for anything measurable; use this "
+                         "Default window 1024x1024 (PICO-8's screen is always 128x128; only the window scales). The window tools "
+                         "(play_script, send_keys, capture_game) then target THIS window by pid, never another PICO-8 the user has "
+                         "open. Use play_script to play it in real time. Prefer simulate_cart for anything measurable; use this "
                          "to SEE the game."),
             inputSchema={
                 "type": "object",
@@ -200,9 +209,28 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "keys": {"type": "string"},
                     "hold_ms": {"type": "integer", "description": "press duration per key (default 80)"},
-                    "gap_ms": {"type": "integer", "description": "pause between keys (default 120)"}
+                    "gap_ms": {"type": "integer", "description": "pause between keys (default 120)"},
+                    "pid": {"type": "integer", "description": "target this PICO-8 process (default: the one run_cart launched)"}
                 },
                 "required": ["keys"]
+            }
+        ),
+        Tool(
+            name="play_script",
+            description=("Play the running cart in REAL TIME from one call and get a filmstrip back. Separate send_keys/capture "
+                         "calls are too slow for action games (the game moves on between calls) and cannot screenshot while a key "
+                         "is held; this can. script: space-separated tokens - down:KEY up:KEY (keys stay held until released), "
+                         "tap:KEY, hold:KEY:MS, wait:MS, shot (max 16). Example: 'tap:x wait:600 down:right down:x wait:150 shot "
+                         "wait:150 shot up:x wait:200 shot'. All keys are released at the end. Waits for the cart to finish booting "
+                         "first (keys sent during boot are lost). Keys: x z c v up down left right enter esc p space r f6 w a s d q e."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "script": {"type": "string"},
+                    "pid": {"type": "integer", "description": "target this PICO-8 process (default: the one run_cart launched)"},
+                    "shot_size": {"type": "integer", "description": "px per frame in the filmstrip (default 256)"}
+                },
+                "required": ["script"]
             }
         ),
         Tool(
@@ -217,7 +245,8 @@ async def list_tools() -> list[Tool]:
                     "delay_ms": {"type": "integer", "description": "wait before first capture (default 500)"},
                     "count": {"type": "integer", "description": "number of screenshots (default 1, max 6)"},
                     "interval_ms": {"type": "integer", "description": "gap between shots (default 2000)"},
-                    "max_size": {"type": "integer", "description": "longest edge in px (default 512)"}
+                    "max_size": {"type": "integer", "description": "longest edge in px (default 512)"},
+                    "pid": {"type": "integer", "description": "target this PICO-8 process (default: the one run_cart launched)"}
                 }
             }
         ),
@@ -917,10 +946,16 @@ Claude can reference it automatically when needed."""
                 a["cart_path"], a["seconds"], setup_lua=a.get("setup_lua", ""),
                 log_every=a.get("log_every", 30), log_lua=a.get("log_lua", ""),
                 patches=a.get("patches"), call_draw=a.get("call_draw", False),
-                stop_when=a.get("stop_when", ""), timeout=a.get("timeout", 120))
+                stop_when=a.get("stop_when", ""), timeout=a.get("timeout", 120),
+                runs=a.get("runs", 1), seed=a.get("seed"), summary_lua=a.get("summary_lua", ""),
+                inputs_lua=a.get("inputs_lua", ""), real_cartdata=a.get("real_cartdata", False))
             head = f"=== SIMULATION ({r['seconds']}s wall clock) ==="
             if r["error"]:
                 head += f"\n❌ {r['error']}"
+            if r.get("summary"):
+                s = r["summary"]
+                head += (f"\nSUMMARY over {s['runs']} runs: min={s['min']} avg={s['avg']} max={s['max']}"
+                         f"  values={' '.join(str(v) for v in s['values'])}")
             return text(f"{head}\n{r['output']}")
 
         if name == "run_headless":
@@ -935,19 +970,27 @@ Claude can reference it automatically when needed."""
             pid = p8tools.run_cart(arguments["cart_path"], arguments.get("width", 1024), arguments.get("height", 1024), restart=restart)
             return text(f"PICO-8 launched (pid {pid}) running {arguments['cart_path']}"
                         + (" (any previous PICO-8 window was closed)" if restart else " (existing PICO-8 windows left running)")
-                        + ". Use capture_game to look at it, send_keys to play.")
+                        + ". Window tools now target this pid. Use play_script to play it in real time, capture_game to look.")
 
         if name == "stop_cart":
             return text(p8tools.stop_cart())
 
         if name == "send_keys":
-            r = p8tools.send_keys(arguments["keys"], arguments.get("hold_ms", 80), arguments.get("gap_ms", 120))
+            r = p8tools.send_keys(arguments["keys"], arguments.get("hold_ms", 80), arguments.get("gap_ms", 120),
+                                  pid=arguments.get("pid"))
             return text(json.dumps(r))
+
+        if name == "play_script":
+            png, title, log = p8tools.play_script(arguments["script"], pid=arguments.get("pid"),
+                                                  shot_size=arguments.get("shot_size", 256))
+            cap = f"{title}: " + ("; ".join(log) if log else "script ran, no shots requested")
+            return image(png, cap) if png else text(cap)
 
         if name == "capture_game":
             out = []
+            pid = arguments.get("pid")
             if arguments.get("keys"):
-                r = p8tools.send_keys(arguments["keys"])
+                r = p8tools.send_keys(arguments["keys"], pid=pid)
                 out.append(TextContent(type="text", text=f"sent keys {r['sent']} (focused={r['focused']})"))
             import time as _t
             _t.sleep(arguments.get("delay_ms", 500) / 1000)
@@ -955,7 +998,7 @@ Claude can reference it automatically when needed."""
             for i in range(count):
                 if i:
                     _t.sleep(arguments.get("interval_ms", 2000) / 1000)
-                png, title, size = p8tools.capture_window(arguments.get("max_size", 512))
+                png, title, size = p8tools.capture_window(arguments.get("max_size", 512), pid=pid)
                 out += image(png, f"{title} shot {i+1}/{count} ({size[0]}x{size[1]})")
             return out
 

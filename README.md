@@ -27,7 +27,10 @@ sections are raw hex nobody should type by hand. The tools here remove each of t
 |---|---|
 | "Does it crash 12 minutes in?" / "Is sector 4 too hard?" | `simulate_cart` runs the game loop headless with telemetry |
 | "Does this helper function work?" | `run_headless` runs any Lua against the cart and returns `printh` output |
-| "What does it look like?" | `run_cart` + `capture_game` return real screenshots; `send_keys` plays it |
+| "Is my change easier or harder?" | `simulate_cart` with `runs`, `seed` and `summary_lua` gives min/avg/max over many games |
+| "Let a bot play it" | `simulate_cart` `inputs_lua` presses buttons each frame, so `btn()`/`btnp()` work headless |
+| "What does it look like?" | `run_cart` + `capture_game` return real screenshots |
+| "Play it in real time" | `play_script` holds keys, waits and screenshots in one call and returns a filmstrip |
 | "Draw me a sprite / write a jingle" | `set_sprite`, `set_sfx` (`"c4:2 e4:2 g4:4"`), `set_music`, `render_gfx` |
 | 300 lint warnings about globals | `validate_cart` hides PICO-8-style global noise by default |
 
@@ -42,7 +45,7 @@ uv sync
 ```
 
 PICO-8 is auto-detected in the usual install locations on Windows, macOS and Linux, or set `PICO8_EXE` to the
-executable path. The window tools (`run_cart`, `send_keys`, `capture_game`) are Windows-only for now; everything
+executable path. The window tools (`run_cart`, `play_script`, `send_keys`, `capture_game`) are Windows-only for now; everything
 else, including headless simulation, is cross-platform.
 
 ### Claude Code
@@ -75,10 +78,12 @@ gotchas that bite LLM-written carts (fixed-point overflow, token budget, uniniti
 1. Edit the `__lua__` section of the `.p8` as plain text.
 2. `validate_cart` — tokens (8192 max), compressed size, syntax, meaningful lint.
 3. `simulate_cart` — run it. Catch runtime errors (reported with cart line numbers) and read your own telemetry:
-   levels per minute, kills, enemies on screen, boss HP, hits taken. Use `patches` to inject a god mode or an
-   autopilot so the game plays itself; `stop_when` to end on win/death.
+   levels per minute, kills, enemies on screen, boss HP, hits taken. Use `inputs_lua` to let a bot press the
+   buttons, `patches` for god mode, `stop_when` to end on win/death, and `runs` + `summary_lua` to compare a
+   balance change over many games instead of one lucky run. Saves are sandboxed, so bots never touch the
+   player's best score.
 4. `set_sprite` / `set_sfx` / `set_music`, then `render_gfx` to check the art.
-5. `run_cart` + `capture_game` when you actually need to see it.
+5. `run_cart` + `play_script` / `capture_game` when you actually need to see it.
 
 Example `simulate_cart` call:
 
@@ -106,6 +111,22 @@ returns
 [24:39] STOP lvl=31 hits=33 enemies=0 boss=0
 ```
 
+Balance check over many games with a bot, no patches needed:
+
+```json
+{
+  "cart_path": "tether.p8",
+  "seconds": 180,
+  "setup_lua": "newgame()",
+  "inputs_lua": "if not hk then if ft%3==0 then press(5,1) end else press(5,2) end",
+  "stop_when": "st==\"dead\"",
+  "runs": 12, "seed": 1, "summary_lua": "h"
+}
+```
+
+returns `SUMMARY over 12 runs: min=… avg=… max=…` plus each run's log, and a `peak frame cpu=` line
+(pass `call_draw` to include draw cost - it matches PICO-8's own CPU meter closely).
+
 ## Tools
 
 ### Analysis (from shrinko8)
@@ -114,14 +135,21 @@ returns
 - **read_cart** `(cart_path, section)` — code with PICO-8 glyphs intact, plus a summary of the sprites / sfx / music defined
 
 ### Headless execution (`pico8 -x`)
-- **simulate_cart** `(cart_path, seconds, setup_lua, log_every, log_lua, stop_when, patches, call_draw, timeout)`
+- **simulate_cart** `(cart_path, seconds, setup_lua, log_every, log_lua, stop_when, patches, call_draw, timeout,
+  inputs_lua, runs, seed, summary_lua, real_cartdata=false)` — `inputs_lua` runs before every frame and calls
+  `press(0..5)`; `runs`/`seed`/`summary_lua` batch and aggregate; `cartdata`/`dget`/`dset` live in memory
+  unless `real_cartdata`
 - **run_headless** `(cart_path, driver_lua, timeout)`
 
 ### Window control (Windows)
 - **run_cart** `(cart_path, width=1024, height=1024, restart=true)` — `restart=true` closes any PICO-8 already
-  running; pass `false` when a human may be playing in their own window
-- **send_keys** `(keys)` — `x z c v up down left right enter esc p space r f6`, `wait:MS`, `hold:KEY:MS`
-- **capture_game** `(keys?, delay_ms, count, interval_ms, max_size)` — PNG screenshots of the game area
+  running; pass `false` when a human may be playing in their own window. The window tools below then target
+  the launched process by pid, never someone else's PICO-8 (or a browser tab with "pico-8" in its title)
+- **play_script** `(script, pid?, shot_size=256)` — real-time input in one call: `down:KEY up:KEY tap:KEY
+  hold:KEY:MS wait:MS shot`; keys stay held until released, all are released at the end, and it waits for the
+  cart to finish booting (keys sent during boot are lost). Returns a numbered filmstrip plus shot timings
+- **send_keys** `(keys, pid?)` — `x z c v up down left right enter esc p space r f6`, `wait:MS`, `hold:KEY:MS`
+- **capture_game** `(keys?, delay_ms, count, interval_ms, max_size, pid?)` — PNG screenshots of the game area
 - **stop_cart**
 
 ### Data authoring
