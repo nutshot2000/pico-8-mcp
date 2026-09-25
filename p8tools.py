@@ -297,7 +297,10 @@ def _find_window(title_substr="PICO-8"):
         return True
 
     u.EnumWindows(EnumProc(cb), 0)
-    return found[0] if found else (None, None)
+    # PICO-8's own window is "PICO-8" or "CART.P8 (PICO-8)"; a browser tab titled
+    # "...pico-8-mcp..." must not win just because it is higher in z-order
+    real = [w for w in found if w[1].upper() == "PICO-8" or w[1].upper().endswith("(PICO-8)")]
+    return (real or found or [(None, None)])[0]
 
 
 # vk, scancode, extended
