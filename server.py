@@ -235,7 +235,9 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="capture_game",
-            description=("Screenshot the running PICO-8 window and return the image (downscaled to max_size px). Optionally send keys "
+            description=("Screenshot the running PICO-8 window and return the image (downscaled to max_size px). The target window "
+                         "is brought to the front first (the grab copies screen pixels, so a covering window would be captured "
+                         "instead). Optionally send keys "
                          "first and wait `delay_ms` before capturing; `count`>1 takes several shots `interval_ms` apart to see motion. "
                          "Caution: if a human is also playing, the keys and the game state you see may not be yours."),
             inputSchema={

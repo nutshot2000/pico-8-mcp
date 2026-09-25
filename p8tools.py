@@ -444,6 +444,9 @@ def _grab(pid=None, max_size=512, hwnd=None, title=None):
     if not hwnd:
         raise RuntimeError("no PICO-8 window found - call run_cart first")
     u = _u32()
+    # the grab copies screen pixels, so a window covering ours would be captured instead
+    if u.GetForegroundWindow() != hwnd:
+        _focus(hwnd)
 
     class RECT(ctypes.Structure):
         _fields_ = [("l", ctypes.c_long), ("t", ctypes.c_long), ("r", ctypes.c_long), ("b", ctypes.c_long)]
