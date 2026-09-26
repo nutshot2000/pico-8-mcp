@@ -300,10 +300,12 @@ def _kill_pico8():
 
 
 _last_pid = None   # window tools target the cart we launched, never somebody else's PICO-8
+_launched_at = 0.0
+BOOT_SECONDS = 4.0  # PICO-8 shows "booting cartridge.." for a while AFTER the window title changes
 
 
 def run_cart(cart_path, width=1024, height=1024, restart=True):
-    global _last_pid
+    global _last_pid, _launched_at
     exe = _find_pico8()
     if restart:
         _kill_pico8()
@@ -315,6 +317,7 @@ def run_cart(cart_path, width=1024, height=1024, restart=True):
         kw["start_new_session"] = True
     proc = subprocess.Popen([exe, "-width", str(width), "-height", str(height), "-run", str(Path(cart_path).resolve())], **kw)
     _last_pid = proc.pid
+    _launched_at = time.time()
     return proc.pid
 
 
@@ -377,6 +380,42 @@ def _find_window(title_substr="PICO-8", pid=None):
     return (real or found or [(None, None)])[0][:2]
 
 
+def _alive(pid):
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    code = ctypes.c_ulong()
+    ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+    k.CloseHandle(h)
+    return bool(ok) and code.value == 259          # STILL_ACTIVE
+
+
+def _target_window(pid=None, wait=10):
+    """The window to drive, waiting up to `wait` s for a cart that is still opening.
+
+    Right after run_cart the process exists but its window does not yet; without
+    waiting, a call would fail, or worse fall back to another PICO-8 window the
+    user has open. If our launched cart is still running we wait for ITS window."""
+    if not pid and _last_pid and not _alive(_last_pid):
+        raise RuntimeError(f"the cart run_cart launched (pid {_last_pid}) has closed - run_cart again, or pass "
+                           "pid=... to drive another PICO-8 window on purpose")
+    want = pid or _last_pid
+    t_end = time.time() + wait
+    while True:
+        try:
+            hwnd, title = _find_window(pid=want) if want else _find_window()
+        except RuntimeError:
+            hwnd, title = None, None
+        if hwnd:
+            return hwnd, title
+        if time.time() > t_end or (want and not _alive(want)):
+            if want:
+                raise RuntimeError(f"no window for PICO-8 pid {want} after waiting - it closed or failed to start")
+            raise RuntimeError("no PICO-8 window found - call run_cart first")
+        time.sleep(0.2)
+
+
 # vk, scancode, extended
 KEYMAP = {
     "x": (0x58, 0x2D, 0), "z": (0x5A, 0x2C, 0), "c": (0x43, 0x2E, 0), "v": (0x56, 0x2F, 0),
@@ -404,7 +443,7 @@ def _focus(hwnd):
 
 def send_keys(keys, hold_ms=80, gap_ms=120, pid=None):
     """keys: space separated names from KEYMAP; 'wait:N' sleeps N ms; 'hold:name:N' holds a key N ms."""
-    hwnd, title = _find_window(pid=pid)
+    hwnd, title = _target_window(pid)
     if not hwnd:
         raise RuntimeError("no PICO-8 window found - call run_cart first")
     ok = _focus(hwnd)
@@ -440,7 +479,7 @@ def _grab(pid=None, max_size=512, hwnd=None, title=None):
     """PIL image of the PICO-8 window's client area."""
     from PIL import ImageGrab
     if hwnd is None:
-        hwnd, title = _find_window(pid=pid)
+        hwnd, title = _target_window(pid)
     if not hwnd:
         raise RuntimeError("no PICO-8 window found - call run_cart first")
     u = _u32()
@@ -475,15 +514,15 @@ def play_script(script, pid=None, shot_size=256, wait_ready=True):
     cart to finish booting first (a key sent while PICO-8 boots is lost).
     Returns (png_bytes, title, shot_log)."""
     from PIL import Image, ImageDraw
-    hwnd, title = _find_window(pid=pid)
-    if not hwnd:
-        raise RuntimeError("no PICO-8 window found - call run_cart first")
+    hwnd, title = _target_window(pid)
     if wait_ready:
         t_end = time.time() + 10
         while not title.upper().endswith("(PICO-8)") and time.time() < t_end:
             time.sleep(0.2)
-            hwnd, title = _find_window(pid=pid)
-        time.sleep(0.3)
+            hwnd, title = _target_window(pid)
+        # the title flips to the cart name while "booting cartridge.." is still on screen
+        if not pid or int(pid) == _last_pid:
+            time.sleep(max(0.3, _launched_at + BOOT_SECONDS - time.time()))
     _focus(hwnd)
     held, shots, log = set(), [], []
     t0 = time.time()

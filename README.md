@@ -145,6 +145,9 @@ returns `SUMMARY over 12 runs: min=… avg=… max=…` plus each run's log, and
 - **run_cart** `(cart_path, width=1024, height=1024, restart=true)` — `restart=true` closes any PICO-8 already
   running; pass `false` when a human may be playing in their own window. The window tools below then target
   the launched process by pid, never someone else's PICO-8 (or a browser tab with "pico-8" in its title)
+  - and they wait for it: call them straight after `run_cart` and they wait for its window (and for PICO-8's
+  boot text to clear) instead of failing. If that cart has closed they stop with an error rather than fall
+  back to another window; pass `pid` to drive a different PICO-8 window on purpose
 - **play_script** `(script, pid?, shot_size=256)` — real-time input in one call: `down:KEY up:KEY tap:KEY
   hold:KEY:MS wait:MS shot`; keys stay held until released, all are released at the end, and it waits for the
   cart to finish booting (keys sent during boot are lost). Returns a numbered filmstrip plus shot timings
